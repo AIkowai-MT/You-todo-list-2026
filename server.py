@@ -507,79 +507,86 @@ def process_single_video(url, api_key):
     # 方法C: Invidious API (第3の矢: IPブロック回避)
     if not transcript_text:
         print("yt-dlp failed. Trying Invidious API fallback...")
-        # 信頼性の高いインスタンスリスト
+        # インスタンスリストを拡充
         invidious_instances = [
             "https://inv.tux.pizza",
             "https://vid.puffyan.us",
             "https://inv.nadeko.net",
             "https://invidious.jing.rocks",
-            "https://yt.artemislena.eu"
+            "https://yt.artemislena.eu",
+            "https://invidious.flokinet.to",
+            "https://invidious.privacydev.net", 
+            "https://iv.ggtyler.dev"
         ]
+        
+        # ランダムシャッフルして負荷分散（毎回同じ順序だと最初が落ちていると遅い）
+        import random
+        random.shuffle(invidious_instances)
         
         for instance in invidious_instances:
             try:
                 print(f"Trying Invidious instance: {instance}")
-                # WebVTT形式で字幕を取得
-                # API: /api/v1/captions/{video_id}?label=Japanese&lang=ja
-                # まずは動画情報を取得して利用可能な字幕を探すのが確実だが、直接叩いてみる
                 
-                # 日本語字幕トライ
-                caption_url = f"{instance}/api/v1/captions/{video_id}?label=Japanese&lang=ja"
-                # または自動生成
-                # caption_url = f"{instance}/api/v1/captions/{video_id}?label=Japanese%20(auto-generated)&lang=ja"
-                
-                # 動画メタデータからキャプション情報を得る方が確実
+                # 動画メタデータからキャプション情報を得る
                 meta_url = f"{instance}/api/v1/videos/{video_id}"
-                meta_res = requests.get(meta_url, timeout=10)
-                if meta_res.status_code == 200:
-                    meta_data = meta_res.json()
-                    captions = meta_data.get('captions', [])
+                meta_res = requests.get(meta_url, timeout=15) # タイムアウト延長
+                
+                if meta_res.status_code != 200:
+                    print(f"  -> Meta fetch failed: {meta_res.status_code}")
+                    continue
                     
-                    target_caption = None
-                    # 日本語優先
+                meta_data = meta_res.json()
+                captions = meta_data.get('captions', [])
+                
+                target_caption = None
+                # 日本語優先
+                for cap in captions:
+                    if cap.get('language') == 'ja':
+                        target_caption = cap
+                        break
+                # なければ英語
+                if not target_caption:
                     for cap in captions:
-                        if cap.get('language') == 'ja':
+                        if cap.get('language') == 'en':
                             target_caption = cap
                             break
-                    # なければ英語
-                    if not target_caption:
-                        for cap in captions:
-                            if cap.get('language') == 'en':
-                                target_caption = cap
-                                break
+                            
+                if not target_caption:
+                    print(f"  -> No Japanese/English caption found in {instance}")
+                    continue
+                
+                cap_path = target_caption.get('url')
+                full_cap_url = f"{instance}{cap_path}" if cap_path.startswith('/') else f"{instance}/{cap_path}"
+                
+                print(f"Fetching caption from: {full_cap_url}")
+                cap_res = requests.get(full_cap_url, timeout=15)
+                
+                if cap_res.status_code == 200:
+                    vtt_content = cap_res.text
+                    # WebVTT to Text (簡易パーサー)
+                    lines = vtt_content.splitlines()
+                    found_text = ""
+                    seen_lines = set()
+                    for line in lines:
+                        line = line.strip()
+                        if not line: continue
+                        if line == 'WEBVTT': continue
+                        if '-->' in line: continue
+                        if line.isdigit(): continue
+                        # 重複排除しつつテキスト化
+                        if line not in seen_lines:
+                            found_text += line + " "
+                            seen_lines.add(line)
                     
-                    if target_caption:
-                        cap_path = target_caption.get('url') # /api/v1/captions/...
-                        if cap_path.startswith('/'):
-                            full_cap_url = f"{instance}{cap_path}"
-                        else:
-                            full_cap_url = f"{instance}{cap_path}"
-                            
-                        print(f"Fetching caption from: {full_cap_url}")
-                        cap_res = requests.get(full_cap_url, timeout=10)
-                        if cap_res.status_code == 200:
-                            # VTT形式
-                            vtt_content = cap_res.text
-                            # VTT to Text
-                            lines = vtt_content.splitlines()
-                            found_text = ""
-                            seen_lines = set()
-                            for line in lines:
-                                line = line.strip()
-                                if not line: continue
-                                if line == 'WEBVTT': continue
-                                if '-->' in line: continue
-                                if line.isdigit(): continue
-                                if line not in seen_lines:
-                                    found_text += line + " "
-                                    seen_lines.add(line)
-                            
-                            transcript_text = found_text
-                            if transcript_text:
-                                print("Successfully fetched from Invidious!")
-                                break
+                    transcript_text = found_text
+                    if transcript_text:
+                        print(f"Successfully fetched from Invidious ({instance})!")
+                        break
+                else:
+                    print(f"  -> Caption fetch failed: {cap_res.status_code}")
+                    
             except Exception as e:
-                print(f"Invidious instance {instance} failed: {e}")
+                print(f"Invidious instance {instance} error: {e}")
                 continue
 
     if not transcript_text:
