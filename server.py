@@ -346,7 +346,14 @@ def process_single_video(url, api_key):
     try:
         # Cookiesの準備 (Render等のデータセンターからのアクセスブロック回避用)
         cookies_file_path = None
-        if os.environ.get('YOUTUBE_COOKIES'):
+        
+        # 優先: プロジェクト直下の cookies.txt (gitで配布されたもの)
+        if os.path.exists('cookies.txt'):
+             cookies_file_path = 'cookies.txt'
+             print(f"Using cookies from local file: {cookies_file_path}")
+             
+        # 次点: 環境変数から生成
+        elif os.environ.get('YOUTUBE_COOKIES'):
             try:
                 import tempfile
                 # 一時ファイルにCookiesを書き出す
@@ -358,6 +365,7 @@ def process_single_video(url, api_key):
                 print(f"Failed to create cookies file: {e}")
 
         yt_instance = YouTubeTranscriptApi()
+
         raw_data = None
         
         # 複数の取得メソッドを試行 (Cookies機能を追加)
