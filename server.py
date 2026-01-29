@@ -332,37 +332,46 @@ def call_gemini_api(prompt_text, api_key):
             
     raise Exception(f"All models failed. Last error: {last_error}")
 
-def process_single_video(url, api_key):
+def process_single_video(url, api_key, provided_transcript=None):
     """
     単一の動画を解析する (Map処理)
+    provided_transcript: クライアント側ですでに取得した字幕があればこれを使う
     """
     print(f"Processing URL: {url}")
     video_id = extract_video_id(url)
     if not video_id:
         return {"error": "Invalid URL", "url": url}
 
-    # 1. 字幕取得
     transcript_text = ""
-    cookies_file_path = None
     
-    # Cookiesの準備
-    if os.path.exists('cookies.txt'):
-         cookies_file_path = 'cookies.txt'
-         print(f"Using cookies from local file: {cookies_file_path}")
-    elif os.environ.get('YOUTUBE_COOKIES'):
-        try:
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as tf:
-                tf.write(os.environ.get('YOUTUBE_COOKIES'))
-                cookies_file_path = tf.name
-            print(f"Using cookies from env: {cookies_file_path}")
-        except Exception as e:
-            print(f"Failed to create cookies file: {e}")
+    # 0. クライアント提供の字幕があれば優先使用 (サーバーサイドブロック回避の切り札)
+    if provided_transcript:
+        print("Using provided transcript from client (skipping server-side fetch)")
+        transcript_text = provided_transcript
+    else: 
+        # 以下、従来のサーバーサイド取得ロジックのための変数初期化
+        cookies_file_path = None
+    
+        # Cookiesの準備
+        if os.path.exists('cookies.txt'):
+             cookies_file_path = 'cookies.txt'
+             print(f"Using cookies from local file: {cookies_file_path}")
+        elif os.environ.get('YOUTUBE_COOKIES'):
+            try:
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as tf:
+                    tf.write(os.environ.get('YOUTUBE_COOKIES'))
+                    cookies_file_path = tf.name
+                print(f"Using cookies from env: {cookies_file_path}")
+            except Exception as e:
+                print(f"Failed to create cookies file: {e}")
 
-    try:
-        # 方法A: youtube-transcript-api (既存)
-        print("Attempting youtube-transcript-api...")
-        yt_instance = YouTubeTranscriptApi()
+    # transcript_text がまだ空（クライアント提供なし）の場合のみサーバーサイド取得を実行
+    if not transcript_text:
+        try:
+            # 方法A: youtube-transcript-api (既存)
+            print("Attempting youtube-transcript-api...")
+            yt_instance = YouTubeTranscriptApi()
         raw_data = None
         
         methods = [
