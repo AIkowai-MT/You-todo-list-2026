@@ -343,33 +343,28 @@ def process_single_video(url, api_key):
 
     # 1. 字幕取得
     transcript_text = ""
+    cookies_file_path = None
+    
+    # Cookiesの準備
+    if os.path.exists('cookies.txt'):
+         cookies_file_path = 'cookies.txt'
+         print(f"Using cookies from local file: {cookies_file_path}")
+    elif os.environ.get('YOUTUBE_COOKIES'):
+        try:
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as tf:
+                tf.write(os.environ.get('YOUTUBE_COOKIES'))
+                cookies_file_path = tf.name
+            print(f"Using cookies from env: {cookies_file_path}")
+        except Exception as e:
+            print(f"Failed to create cookies file: {e}")
+
     try:
-        # Cookiesの準備 (Render等のデータセンターからのアクセスブロック回避用)
-        cookies_file_path = None
-        
-        # 優先: プロジェクト直下の cookies.txt (gitで配布されたもの)
-        if os.path.exists('cookies.txt'):
-             cookies_file_path = 'cookies.txt'
-             print(f"Using cookies from local file: {cookies_file_path}")
-             
-        # 次点: 環境変数から生成
-        elif os.environ.get('YOUTUBE_COOKIES'):
-            try:
-                import tempfile
-                # 一時ファイルにCookiesを書き出す
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as tf:
-                    tf.write(os.environ.get('YOUTUBE_COOKIES'))
-                    cookies_file_path = tf.name
-                print(f"Using cookies from env: {cookies_file_path}")
-            except Exception as e:
-                print(f"Failed to create cookies file: {e}")
-
+        # 方法A: youtube-transcript-api (既存)
+        print("Attempting youtube-transcript-api...")
         yt_instance = YouTubeTranscriptApi()
-
         raw_data = None
         
-        # 複数の取得メソッドを試行 (Cookies機能を追加)
-        # 注意: list_transcripts や get_transcript に cookies 引数を渡す
         methods = [
             lambda: yt_instance.list_transcripts(video_id, cookies=cookies_file_path).find_transcript(['ja', 'en']).fetch(),
             lambda: yt_instance.get_transcript(video_id, cookies=cookies_file_path),
@@ -379,29 +374,126 @@ def process_single_video(url, api_key):
         for method in methods:
             try:
                 data = method()
-                if hasattr(data, 'find_transcript'): # TranscriptList object
+                if hasattr(data, 'find_transcript'): 
                      try: t = data.find_transcript(['ja', 'en']); raw_data = t.fetch()
                      except: raw_data = next(iter(data)).fetch()
                 else:
                      raw_data = data
-                
                 if raw_data: break
-            except Exception as e:
-                # print(f"Method failed: {e}") # デバッグ用
-                continue
-
-        # 一時ファイルの削除
-        if cookies_file_path and os.path.exists(cookies_file_path):
-             try: os.unlink(cookies_file_path)
-             except: pass
-
-        if not raw_data:
-            return {"error": "Subtitle not found (Blocked or No Subtitle)", "url": url}
+            except: continue
             
-        transcript_text = extract_text_safe(raw_data)
+        if raw_data:
+            transcript_text = extract_text_safe(raw_data)
         
+        # 方法B: yt-dlp (フォールバック)
+        if not transcript_text:
+            print("youtube-transcript-api failed, trying yt-dlp...")
+            import yt_dlp
+            
+            ydl_opts = {
+                'skip_download': True,
+                'writesubtitles': True,
+                'writeautomaticsub': True,
+                'subtitleslangs': ['ja', 'en'],
+                'subtitlesformat': 'json3', # JSON形式で取得
+                'quiet': True,
+                'cookiefile': cookies_file_path
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                # 字幕データを探す
+                import json
+                
+                # 自動字幕と手動字幕の両方を探す
+                subtitles = info.get('subtitles', {}) or info.get('automatic_captions', {})
+                
+                target_lang = None
+                if 'ja' in subtitles: target_lang = 'ja'
+                elif 'en' in subtitles: target_lang = 'en'
+                else: 
+                     # 他の言語でもあれば使う
+                     for lang in subtitles:
+                         if lang.startswith('ja') or lang.startswith('en'):
+                             target_lang = lang
+                             break
+                     if not target_lang and subtitles:
+                         target_lang = list(subtitles.keys())[0]
+
+                if target_lang:
+                    # JSON3形式の字幕URLを取得
+                    subs_list = subtitles[target_lang]
+                    json3_url = next((s['url'] for s in subs_list if s.get('ext') == 'json3'), None)
+                    
+                    if not json3_url:
+                        # json3がない場合はvttなどを取得して無理やりテキスト化もできるが、
+                        # 今回はjson3が取れるケース（yt-dlp内部処理）に期待するか、
+                        # download=Trueにしてファイルを読む手が普通。
+                        # メモリ上で完結させるため、requestsでjson3を取る
+                        json3_url = subs_list[0]['url'] # とりあえず最初のURL
+                        
+                    print(f"Fetching subtitles from: {json3_url}")
+                    allow_redirects = True
+                    # json3リクエストにもcookiesが必要な場合がある
+                    # yt-dlpのcookie jarを使うのがベストだが、ここでは簡易的にrequestsでトライ
+                    # requestsのcookies引数にcookiejarを渡すのは手間なので、headersで試みるか、
+                    # あるいはyt-dlpのdownload機能を使ってファイルに落とすのが確実。
+                    
+                    # 確実性を取ってファイルダウンロード方式に変更
+                    # ファイルは /tmp/ (Render対応) に保存
+                    
+            # 再度 yt-dlp (ファイルダウンロード方式)
+            print("Trying yt-dlp file download mode...")
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmpdir:
+                out_tmpl = os.path.join(tmpdir, '%(id)s')
+                ydl_opts = {
+                    'skip_download': True,
+                    'writesubtitles': True,
+                    'writeautomaticsub': True,
+                    'subtitleslangs': ['ja', 'en'],
+                    'quiet': True,
+                    'cookiefile': cookies_file_path,
+                    'outtmpl': out_tmpl
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+                
+                # 生成されたファイルを探索 (.ja.vtt, .en.vtt など)
+                found_text = ""
+                for filename in os.listdir(tmpdir):
+                    if filename.endswith('.vtt'):
+                        # vttを簡易パース
+                        with open(os.path.join(tmpdir, filename), 'r', encoding='utf-8') as f:
+                            lines = f.readlines()
+                            # WEBVTTヘッダーやタイムスタンプを除去してテキストのみ抽出
+                            seen_lines = set() # 重複除去
+                            for line in lines:
+                                line = line.strip()
+                                if not line: continue
+                                if line == 'WEBVTT': continue
+                                if '-->' in line: continue
+                                if line.isdigit(): continue # 行番号
+                                if line not in seen_lines:
+                                    found_text += line + " "
+                                    seen_lines.add(line)
+                        break # 1つ見つかればOK
+                
+                transcript_text = found_text
+
     except Exception as e:
-        return {"error": f"Transcript error: {str(e)}", "url": url}
+        print(f"Subtitle extraction failed: {e}")
+        # エラーは握りつぶさず、最終的にtranscript_textが空ならエラーを返す
+
+    # 一時ファイルの削除
+    if cookies_file_path and os.path.exists(cookies_file_path) and os.environ.get('YOUTUBE_COOKIES'):
+            try: os.unlink(cookies_file_path)
+            except: pass
+
+    if not transcript_text:
+        return {"error": "Subtitle not found (Server blocked by YouTube. Cookies setup required or invalid).", "url": url}
+
+
 
     # 2. Gemini解析 (単体)
     try:

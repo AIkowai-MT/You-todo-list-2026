@@ -1,9 +1,11 @@
 flask
-youtube-transcript-api
 flask-cors
 requests
+google-generativeai
+youtube-transcript-api
 google-auth-oauthlib
 google-auth-httplib2
 google-api-python-client
 python-dotenv
 gunicorn
+yt-dlp
