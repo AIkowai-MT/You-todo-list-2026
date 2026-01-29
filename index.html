@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube ToDo抽出 - AIがやることリストを自動生成</title>
+    <meta name="description" content="YouTube動画のURLを入力するだけで、AIが内容を解析してやることリストを自動生成します">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'midnight': '#0f172a',
+                        'deep-blue': '#1e293b',
+                        'neon-purple': '#a855f7',
+                        'neon-blue': '#3b82f6',
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .glow-effect {
+            box-shadow: 0 0 20px rgba(168, 85, 247, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .glow-effect:focus {
+            box-shadow: 0 0 30px rgba(168, 85, 247, 0.6), 0 0 60px rgba(59, 130, 246, 0.4);
+            outline: none;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #a855f7 0%, #3b82f6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .gradient-bg {
+            background: linear-gradient(135deg, #a855f7 0%, #3b82f6 100%);
+        }
+
+        .card-glass {
+            background: rgba(30, 41, 59, 0.95);
+            /* 半透明を減らして描画負荷を軽減 */
+            border: 1px solid rgba(168, 85, 247, 0.3);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        @keyframes wave {
+
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+
+            50% {
+                transform: translateY(-10px);
+            }
+        }
+
+        .wave-animation {
+            animation: wave 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse-glow {
+
+            0%,
+            100% {
+                opacity: 0.5;
+            }
+
+            50% {
+                opacity: 1;
+            }
+        }
+
+        .pulse-glow {
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+
+        .task-item {
+            transition: all 0.3s ease;
+        }
+
+        .task-item:hover {
+            transform: translateX(5px);
+            background: rgba(168, 85, 247, 0.1);
+        }
+
+        .task-item.completed {
+            opacity: 0.6;
+            text-decoration: line-through;
+        }
+    </style>
+</head>
+
+<body class="bg-midnight min-h-screen text-gray-100">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        function App() {
+            const [url, setUrl] = useState('');
+            const [isAnalyzing, setIsAnalyzing] = useState(false);
+            const [result, setResult] = useState(null);
+            const [tasks, setTasks] = useState([]);
+
+            const [googleConnected, setGoogleConnected] = useState(false);
+            const [taskLists, setTaskLists] = useState([]);
+            const [selectedTaskList, setSelectedTaskList] = useState('');
+            const [isAddingToGoogle, setIsAddingToGoogle] = useState(false);
+
+            // Google認証状態の確認
+            React.useEffect(() => {
+                checkGoogleStatus();
+            }, []);
+
+            const checkGoogleStatus = async () => {
+                try {
+                    const res = await fetch('/api/google/status');
+                    const data = await res.json();
+                    if (data.connected) {
+                        setGoogleConnected(true);
+                        fetchTaskLists();
+                    }
+                } catch (e) {
+                    console.error("Google status check failed", e);
+                }
+            };
+
+            const fetchTaskLists = async () => {
+                try {
+                    const res = await fetch('/api/google/tasklists');
+                    if (res.ok) {
+                        const lists = await res.json();
+                        setTaskLists(lists);
+                        if (lists.length > 0) {
+                            setSelectedTaskList(lists[0].id); // デフォルト選択
+                        }
+                    }
+                } catch (e) {
+                    console.error("Fetch tasklists failed", e);
+                }
+            };
+
+            const handleGoogleLogin = () => {
+                window.location.href = '/google/login';
+            };
+
+            const addToGoogleTasks = async () => {
+                if (!selectedTaskList) {
+                    alert("追加先のリストを選択してください");
+                    return;
+                }
+
+                // チェックが入っていないタスクを追加対象とする場合が多いが、
+                // ここでは「完了していない」タスク、または「全タスク」などをどうするか。
+                // 要望は「リスト化する機能を追加したい」なので、
+                // 「画面上でチェック済み(=完了)のもの」を除外して追加するのが自然か、
+                // あるいは「全て追加」か。
+                // NotebookLMからのフローを考えると「これからやること」を追加したいはず。
+
+                // 今回は「画面に表示されているタスク全て」を追加対象とし、
+                // 完了済み(completed=true)は除外するロジックにする
+                const tasksToAdd = tasks.filter(t => !t.completed).map(t => ({
+                    title: t.text,
+                    notes: `Source: ${result.title}\nSummary: ${result.summary.substring(0, 100)}...`
+                }));
+
+                if (tasksToAdd.length === 0) {
+                    alert("追加する未完了タスクがありません");
+                    return;
+                }
+
+                setIsAddingToGoogle(true);
+                try {
+                    const res = await fetch('/api/google/tasks', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            tasklist_id: selectedTaskList,
+                            tasks: tasksToAdd
+                        })
+                    });
+
+                    const data = await res.json();
+                    if (res.ok) {
+                        alert(`${data.length}件のタスクをGoogle ToDoリストに追加しました！`);
+                    } else {
+                        throw new Error(data.error || "追加に失敗しました");
+                    }
+                } catch (e) {
+                    alert(`エラーが発生しました: ${e.message}`);
+                } finally {
+                    setIsAddingToGoogle(false);
+                }
+            };
+
+            const handleAnalyze = async () => {
+                if (!url.trim()) {
+                    alert('YouTubeのURLを入力してください');
+                    return;
+                }
+
+                setIsAnalyzing(true);
+                setResult(null); // 結果をリセット
+
+                // URLを改行で分割し、空行を除去して配列化
+                const urls = url.split('\n').map(u => u.trim()).filter(u => u.length > 0);
+
+                try {
+                    const response = await fetch('/api/analyze', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ urls }), // 'url' から 'urls' に変更
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.error || '解析に失敗しました');
+                    }
+
+                    setResult(data);
+                    setTasks(data.tasks);
+
+                } catch (error) {
+                    alert(error.message);
+                    console.error('Error:', error);
+                } finally {
+                    setIsAnalyzing(false);
+                }
+            };
+
+            const toggleTask = (id) => {
+                setTasks(tasks.map(task =>
+                    task.id === id ? { ...task, completed: !task.completed } : task
+                ));
+            };
+
+            const copyToClipboard = () => {
+                const taskText = tasks.map((task, index) =>
+                    `${index + 1}. ${task.text}`
+                ).join('\n');
+                navigator.clipboard.writeText(taskText);
+                alert('タスクリストをコピーしました!');
+            };
+
+            const downloadForNotebookLM = () => {
+                if (!result) return;
+
+                const content = `【タイトル】
+${result.title}
+
+【要約】
+${result.summary}
+
+【やることリスト】
+${tasks.map((t, i) => `${i + 1}. [${t.completed ? 'x' : ' '}] ${t.text}`).join('\n')}
+
+==================================================
+【全字幕データ（NotebookLM用）】
+${result.transcript || '（字幕データが取得できませんでした）'}
+`;
+
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                // ファイル名に使えない文字を置換
+                const safeTitle = result.title.replace(/[\/\\:*?"<>|]/g, '_').substring(0, 50);
+                a.download = `${safeTitle}_notebooklm.txt`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            return (
+                <div className="min-h-screen py-12 px-4">
+                    {/* ヒーローセクション */}
+                    <div className="max-w-4xl mx-auto text-center mb-16">
+                        <h1 className="text-5xl md:text-6xl font-bold mb-6">
+                            <span className="gradient-text">YouTube動画まとめ</span>
+                            <br />
+                            <span className="text-white">一括でやることリスト化</span>
+                        </h1>
+                        <p className="text-gray-400 text-lg mb-12">
+                            複数の動画URLを貼り付けて、まとめて要約・タスク抽出！<br />
+                            NotebookLM等のリスト消化に最適です。
+                        </p>
+
+                        {/* 入力フォーム */}
+                        <div className="relative mb-8 text-left">
+                            <textarea
+                                value={url}
+                                onChange={(e) => setUrl(e.target.value)}
+                                placeholder="YouTubeのURLを貼り付けてください（改行で区切って複数入力可能）"
+                                className="w-full px-6 py-4 h-40 rounded-2xl bg-deep-blue text-white placeholder-gray-500 glow-effect text-lg resize-none"
+                                disabled={isAnalyzing}
+                            />
+                        </div>
+
+                        <button
+                            onClick={handleAnalyze}
+                            disabled={isAnalyzing}
+                            className="gradient-bg text-white px-8 py-4 rounded-xl font-semibold text-lg hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg w-full md:w-auto"
+                        >
+                            {isAnalyzing ? (
+                                <span className="flex items-center justify-center gap-2">
+                                    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    AIが動画を解析中... (本数が多いと時間がかかります)
+                                </span>
+                            ) : 'まとめて解析を開始'}
+                        </button>
+                    </div>
+
+                    {/* 解析中アニメーション */}
+                    {isAnalyzing && (
+                        <div className="max-w-4xl mx-auto mb-12">
+                            <div className="card-glass rounded-2xl p-8 text-center">
+                                <div className="flex justify-center gap-2 mb-4">
+                                    <div className="w-3 h-3 bg-neon-purple rounded-full wave-animation" style={{ animationDelay: '0s' }}></div>
+                                    <div className="w-3 h-3 bg-neon-blue rounded-full wave-animation" style={{ animationDelay: '0.2s' }}></div>
+                                    <div className="w-3 h-3 bg-neon-purple rounded-full wave-animation" style={{ animationDelay: '0.4s' }}></div>
+                                </div>
+                                <p className="text-gray-300 pulse-glow">
+                                    動画の内容を読み取り、情報を統合しています...<br />
+                                    <span className="text-sm text-gray-500">※完了までブラウザを閉じないでください</span>
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 結果表示 */}
+                    {result && !isAnalyzing && (
+                        <div className="max-w-4xl mx-auto space-y-6">
+
+                            {/* 統合結果カード */}
+                            <div className="card-glass rounded-2xl p-8 border-neon-purple border-2">
+                                <div className="flex justify-between items-start mb-4">
+                                    <div>
+                                        <span className="bg-neon-purple text-xs font-bold px-2 py-1 rounded text-white mb-2 inline-block">統合レポート</span>
+                                        <h2 className="text-2xl font-bold text-white">{result.title}</h2>
+                                    </div>
+                                </div>
+                                <p className="text-gray-300 leading-relaxed mb-6">{result.summary}</p>
+
+                                <div className="bg-deep-blue bg-opacity-50 p-6 rounded-xl">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="text-xl font-bold gradient-text">統合やることリスト</h3>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={downloadForNotebookLM}
+                                                className="text-sm px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 transition-all text-white flex items-center gap-2"
+                                                title="NotebookLM用にダウンロード"
+                                            >
+                                                📄 全データ保存
+                                            </button>
+                                            <button
+                                                onClick={copyToClipboard}
+                                                className="text-sm px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-all text-white"
+                                            >
+                                                📋 コピー
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Google Tasks連携 UI */}
+                                    <div className="mb-6 p-4 border border-gray-700 rounded-lg bg-black bg-opacity-20">
+                                        <div className="flex items-center justify-between flex-wrap gap-4">
+                                            <div className="flex items-center gap-2 text-sm text-gray-300">
+                                                <img src="https://upload.wikimedia.org/wikipedia/commons/5/5b/Google_Tasks_2021.svg" alt="Google Tasks" className="w-5 h-5" />
+                                                Google ToDoリスト連携
+                                            </div>
+
+                                            {!googleConnected ? (
+                                                <button
+                                                    onClick={handleGoogleLogin}
+                                                    className="text-sm px-4 py-2 rounded-lg bg-white text-gray-800 font-bold hover:bg-gray-100 transition-all flex items-center gap-2"
+                                                >
+                                                    Googleアカウントで接続
+                                                </button>
+                                            ) : (
+                                                <div className="flex items-center gap-2 w-full sm:w-auto">
+                                                    <select
+                                                        value={selectedTaskList}
+                                                        onChange={(e) => setSelectedTaskList(e.target.value)}
+                                                        className="text-sm bg-deep-blue border border-gray-600 text-white rounded-lg px-3 py-2 focus:outline-none focus:border-neon-purple flex-1 sm:flex-none"
+                                                    >
+                                                        {taskLists.map(list => (
+                                                            <option key={list.id} value={list.id}>{list.title}</option>
+                                                        ))}
+                                                    </select>
+                                                    <button
+                                                        onClick={addToGoogleTasks}
+                                                        disabled={isAddingToGoogle}
+                                                        className="text-sm px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold transition-all disabled:opacity-50 min-w-[100px]"
+                                                    >
+                                                        {isAddingToGoogle ? '追加中...' : '追加'}
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        {tasks.map((task) => (
+                                            <div
+                                                key={task.id}
+                                                onClick={() => toggleTask(task.id)}
+                                                className={`task-item flex items-start gap-3 p-4 rounded-xl cursor-pointer ${task.completed ? 'completed' : ''}`}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={task.completed}
+                                                    onChange={() => { }}
+                                                    className="mt-1 w-5 h-5 rounded accent-neon-purple cursor-pointer"
+                                                />
+                                                <span className="flex-1 text-gray-200">{task.text}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 個別結果の表示（もしあれば） */}
+                            {result.individual_results && result.individual_results.length > 0 && (
+                                <div className="mt-12">
+                                    <h3 className="text-xl text-gray-400 mb-6 text-center">個別動画の解析結果 ({result.individual_results.length}本)</h3>
+                                    <div className="space-y-6">
+                                        {result.individual_results.map((res, idx) => (
+                                            !res.error && (
+                                                <div key={idx} className="card-glass rounded-2xl p-6 opacity-80 hover:opacity-100 transition-all">
+                                                    <h4 className="text-lg font-bold text-white mb-2">
+                                                        <span className="text-neon-blue mr-2">#{idx + 1}</span>
+                                                        {res.title}
+                                                    </h4>
+                                                    <p className="text-sm text-gray-300 mb-4">{res.summary}</p>
+
+                                                    {res.tasks && (
+                                                        <div className="text-sm text-gray-400">
+                                                            <p className="font-semibold mb-1">抽出されたタスク:</p>
+                                                            <ul className="list-disc list-inside bg-black bg-opacity-20 p-3 rounded-lg">
+                                                                {res.tasks.slice(0, 3).map((t, ti) => (
+                                                                    <li key={ti} className="truncate">{t.text}</li>
+                                                                ))}
+                                                                {res.tasks.length > 3 && <li>...他 {res.tasks.length - 3} 件</li>}
+                                                            </ul>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                        </div>
+                    )}
+
+                    {/* フッター */}
+                    <div className="max-w-4xl mx-auto mt-16 text-center text-gray-500 text-sm">
+                        <p>Powered by Google Gemini AI</p>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</body>
+
+</html>
