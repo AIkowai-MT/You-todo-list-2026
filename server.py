@@ -636,29 +636,42 @@ def analyze_videos():
         return jsonify({"error": "Gemini APIキーが設定されていません。"}), 500
 
     data = request.json
-    # 単一URLと複数URLの両方に対応
+    
+    # 新仕様: items [{"url": "...", "transcript": "..."}]
+    items = data.get('items', [])
+    
+    # 旧仕様: urls ["..."] (後方互換)
     urls = data.get('urls', [])
     if 'url' in data and data['url']:
         urls.append(data['url'])
         
-    urls = [u.strip() for u in urls if u.strip()]
-    if not urls:
-        return jsonify({"error": "URLが必要です"}), 400
+    # itemsがない場合はurlsから構築
+    if not items and urls:
+        items = [{"url": u.strip(), "transcript": None} for u in urls if u.strip()]
+    
+    if not items:
+        return jsonify({"error": "URLまたはアイテムが必要です"}), 400
 
-    print(f"Start analyzing {len(urls)} videos...")
+    print(f"Start analyzing {len(items)} videos...")
     
     results = []
     valid_results = []
     
     # 1. Mapフェーズ: 個別解析
-    for url in urls:
-        res = process_single_video(url, GEMINI_API_KEY)
+    for item in items:
+        url = item.get('url')
+        provided_transcript = item.get('transcript')
+        
+        # URLがない場合はスキップ（transcriptだけでの解析は今回は想定外だが、将来的にありかも）
+        if not url: continue
+        
+        res = process_single_video(url, GEMINI_API_KEY, provided_transcript=provided_transcript)
         results.append(res)
         if "error" not in res:
             valid_results.append(res)
 
     # 単一動画の場合はそのまま返す
-    if len(urls) == 1:
+    if len(items) == 1:
         if "error" in results[0]:
             return jsonify({"error": results[0]["error"]}), 500
         return jsonify(results[0])
