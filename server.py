@@ -344,23 +344,33 @@ def process_single_video(url, api_key):
     # 1. 字幕取得
     transcript_text = ""
     try:
+        # Cookiesの準備 (Render等のデータセンターからのアクセスブロック回避用)
+        cookies_file_path = None
+        if os.environ.get('YOUTUBE_COOKIES'):
+            try:
+                import tempfile
+                # 一時ファイルにCookiesを書き出す
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as tf:
+                    tf.write(os.environ.get('YOUTUBE_COOKIES'))
+                    cookies_file_path = tf.name
+                print(f"Using cookies from env: {cookies_file_path}")
+            except Exception as e:
+                print(f"Failed to create cookies file: {e}")
+
         yt_instance = YouTubeTranscriptApi()
         raw_data = None
         
-        # 複数の取得メソッドを試行
+        # 複数の取得メソッドを試行 (Cookies機能を追加)
+        # 注意: list_transcripts や get_transcript に cookies 引数を渡す
         methods = [
-            lambda: yt_instance.list_transcripts(video_id).find_transcript(['ja', 'en']).fetch(),
-            lambda: yt_instance.get_transcript(video_id),
-            lambda: yt_instance.list(video_id), # fallback
-            lambda: YouTubeTranscriptApi.get_transcript(video_id, languages=['ja', 'en']) # static fallback
+            lambda: yt_instance.list_transcripts(video_id, cookies=cookies_file_path).find_transcript(['ja', 'en']).fetch(),
+            lambda: yt_instance.get_transcript(video_id, cookies=cookies_file_path),
+            lambda: YouTubeTranscriptApi.get_transcript(video_id, languages=['ja', 'en'], cookies=cookies_file_path)
         ]
         
         for method in methods:
             try:
                 data = method()
-                # list_transcriptsの場合はfind_transcriptが必要なケースもあるが、
-                # ここでは簡易化のため、成功してデータが取れればOKとする
-                # 厳密にはここも前のコード同様の堅牢なロジックが必要だが、extract_text_safeが吸収する
                 if hasattr(data, 'find_transcript'): # TranscriptList object
                      try: t = data.find_transcript(['ja', 'en']); raw_data = t.fetch()
                      except: raw_data = next(iter(data)).fetch()
@@ -368,11 +378,17 @@ def process_single_video(url, api_key):
                      raw_data = data
                 
                 if raw_data: break
-            except:
+            except Exception as e:
+                # print(f"Method failed: {e}") # デバッグ用
                 continue
 
+        # 一時ファイルの削除
+        if cookies_file_path and os.path.exists(cookies_file_path):
+             try: os.unlink(cookies_file_path)
+             except: pass
+
         if not raw_data:
-            return {"error": "Subtitle not found", "url": url}
+            return {"error": "Subtitle not found (Blocked or No Subtitle)", "url": url}
             
         transcript_text = extract_text_safe(raw_data)
         
