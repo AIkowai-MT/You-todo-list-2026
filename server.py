@@ -452,38 +452,52 @@ def process_single_video(url, api_key):
                     'writesubtitles': True,
                     'writeautomaticsub': True,
                     'subtitleslangs': ['ja', 'en'],
-                    'quiet': True,
+                    'quiet': False, # ログ出力有効化
+                    'verbose': True, # デバッグモード
                     'cookiefile': cookies_file_path,
-                    'outtmpl': out_tmpl
+                    'outtmpl': out_tmpl,
+                    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'http_headers': {
+                        'Referer': 'https://www.youtube.com/',
+                        'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7'
+                    },
+                    'nocheckcertificate': True,
                 }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
                 
-                # 生成されたファイルを探索 (.ja.vtt, .en.vtt など)
-                found_text = ""
-                for filename in os.listdir(tmpdir):
-                    if filename.endswith('.vtt'):
-                        # vttを簡易パース
-                        with open(os.path.join(tmpdir, filename), 'r', encoding='utf-8') as f:
-                            lines = f.readlines()
-                            # WEBVTTヘッダーやタイムスタンプを除去してテキストのみ抽出
-                            seen_lines = set() # 重複除去
-                            for line in lines:
-                                line = line.strip()
-                                if not line: continue
-                                if line == 'WEBVTT': continue
-                                if '-->' in line: continue
-                                if line.isdigit(): continue # 行番号
-                                if line not in seen_lines:
-                                    found_text += line + " "
-                                    seen_lines.add(line)
-                        break # 1つ見つかればOK
-                
-                transcript_text = found_text
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([url])
+                    
+                    # 生成されたファイルを探索 (.ja.vtt, .en.vtt など)
+                    found_text = ""
+                    for filename in os.listdir(tmpdir):
+                        if filename.endswith('.vtt'):
+                            print(f"Found subtitle file: {filename}")
+                            # vttを簡易パース
+                            with open(os.path.join(tmpdir, filename), 'r', encoding='utf-8') as f:
+                                lines = f.readlines()
+                                # WEBVTTヘッダーやタイムスタンプを除去してテキストのみ抽出
+                                seen_lines = set() # 重複除去
+                                for line in lines:
+                                    line = line.strip()
+                                    if not line: continue
+                                    if line == 'WEBVTT': continue
+                                    if '-->' in line: continue
+                                    if line.isdigit(): continue # 行番号
+                                    if line not in seen_lines:
+                                        found_text += line + " "
+                                        seen_lines.add(line)
+                            break # 1つ見つかればOK
+                    
+                    transcript_text = found_text
+                    
+                except Exception as e:
+                    print(f"yt-dlp download failed: {e}")
+                    traceback.print_exc()
 
     except Exception as e:
-        print(f"Subtitle extraction failed: {e}")
-        # エラーは握りつぶさず、最終的にtranscript_textが空ならエラーを返す
+        print(f"Subtitle extraction overall failed: {e}")
+        traceback.print_exc()
 
     # 一時ファイルの削除
     if cookies_file_path and os.path.exists(cookies_file_path) and os.environ.get('YOUTUBE_COOKIES'):
@@ -491,6 +505,8 @@ def process_single_video(url, api_key):
             except: pass
 
     if not transcript_text:
+        # 詳細なログをサーバーに残すためprint
+        print(f"All methods failed for {url}")
         return {"error": "Subtitle not found (Server blocked by YouTube. Cookies setup required or invalid).", "url": url}
 
 
