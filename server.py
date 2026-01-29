@@ -348,14 +348,14 @@ def process_single_video(url, api_key, provided_transcript=None):
     if provided_transcript:
         print("Using provided transcript from client (skipping server-side fetch)")
         transcript_text = provided_transcript
-    else: 
-        # 以下、従来のサーバーサイド取得ロジックのための変数初期化
+    
+    # 以下、サーバーサイド取得ロジック (クライアント取得がなかった場合のみ)
+    if not transcript_text:
         cookies_file_path = None
     
         # Cookiesの準備
         if os.path.exists('cookies.txt'):
              cookies_file_path = 'cookies.txt'
-             print(f"Using cookies from local file: {cookies_file_path}")
         elif os.environ.get('YOUTUBE_COOKIES'):
             try:
                 import tempfile
@@ -366,105 +366,47 @@ def process_single_video(url, api_key, provided_transcript=None):
             except Exception as e:
                 print(f"Failed to create cookies file: {e}")
 
-    # transcript_text がまだ空（クライアント提供なし）の場合のみサーバーサイド取得を実行
-    if not transcript_text:
         try:
             # 方法A: youtube-transcript-api (既存)
             print("Attempting youtube-transcript-api...")
             yt_instance = YouTubeTranscriptApi()
-        raw_data = None
-        
-        methods = [
-            lambda: yt_instance.list_transcripts(video_id, cookies=cookies_file_path).find_transcript(['ja', 'en']).fetch(),
-            lambda: yt_instance.get_transcript(video_id, cookies=cookies_file_path),
-            lambda: YouTubeTranscriptApi.get_transcript(video_id, languages=['ja', 'en'], cookies=cookies_file_path)
-        ]
-        
-        for method in methods:
-            try:
-                data = method()
-                if hasattr(data, 'find_transcript'): 
-                     try: t = data.find_transcript(['ja', 'en']); raw_data = t.fetch()
-                     except: raw_data = next(iter(data)).fetch()
-                else:
-                     raw_data = data
-                if raw_data: break
-            except: continue
+            raw_data = None
             
-        if raw_data:
-            transcript_text = extract_text_safe(raw_data)
-        
-        # 方法B: yt-dlp (フォールバック)
-        if not transcript_text:
-            print("youtube-transcript-api failed, trying yt-dlp...")
-            import yt_dlp
+            methods = [
+                lambda: yt_instance.list_transcripts(video_id, cookies=cookies_file_path).find_transcript(['ja', 'en']).fetch(),
+                lambda: yt_instance.get_transcript(video_id, cookies=cookies_file_path),
+                lambda: YouTubeTranscriptApi.get_transcript(video_id, languages=['ja', 'en'], cookies=cookies_file_path)
+            ]
             
-            ydl_opts = {
-                'skip_download': True,
-                'writesubtitles': True,
-                'writeautomaticsub': True,
-                'subtitleslangs': ['ja', 'en'],
-                'subtitlesformat': 'json3', # JSON形式で取得
-                'quiet': True,
-                'cookiefile': cookies_file_path
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                # 字幕データを探す
-                import json
+            for method in methods:
+                try:
+                    data = method()
+                    if hasattr(data, 'find_transcript'): 
+                         try: t = data.find_transcript(['ja', 'en']); raw_data = t.fetch()
+                         except: raw_data = next(iter(data)).fetch()
+                    else:
+                         raw_data = data
+                    
+                    if raw_data: break
+                except: continue
                 
-                # 自動字幕と手動字幕の両方を探す
-                subtitles = info.get('subtitles', {}) or info.get('automatic_captions', {})
+            if raw_data:
+                transcript_text = extract_text_safe(raw_data)
+            
+            # 方法B: yt-dlp (フォールバック)
+            if not transcript_text:
+                print("youtube-transcript-api failed, trying yt-dlp...")
+                import yt_dlp
                 
-                target_lang = None
-                if 'ja' in subtitles: target_lang = 'ja'
-                elif 'en' in subtitles: target_lang = 'en'
-                else: 
-                     # 他の言語でもあれば使う
-                     for lang in subtitles:
-                         if lang.startswith('ja') or lang.startswith('en'):
-                             target_lang = lang
-                             break
-                     if not target_lang and subtitles:
-                         target_lang = list(subtitles.keys())[0]
-
-                if target_lang:
-                    # JSON3形式の字幕URLを取得
-                    subs_list = subtitles[target_lang]
-                    json3_url = next((s['url'] for s in subs_list if s.get('ext') == 'json3'), None)
-                    
-                    if not json3_url:
-                        # json3がない場合はvttなどを取得して無理やりテキスト化もできるが、
-                        # 今回はjson3が取れるケース（yt-dlp内部処理）に期待するか、
-                        # download=Trueにしてファイルを読む手が普通。
-                        # メモリ上で完結させるため、requestsでjson3を取る
-                        json3_url = subs_list[0]['url'] # とりあえず最初のURL
-                        
-                    print(f"Fetching subtitles from: {json3_url}")
-                    allow_redirects = True
-                    # json3リクエストにもcookiesが必要な場合がある
-                    # yt-dlpのcookie jarを使うのがベストだが、ここでは簡易的にrequestsでトライ
-                    # requestsのcookies引数にcookiejarを渡すのは手間なので、headersで試みるか、
-                    # あるいはyt-dlpのdownload機能を使ってファイルに落とすのが確実。
-                    
-                    # 確実性を取ってファイルダウンロード方式に変更
-                    # ファイルは /tmp/ (Render対応) に保存
-                    
-            # 再度 yt-dlp (ファイルダウンロード方式)
-            print("Trying yt-dlp file download mode...")
-            import tempfile
-            with tempfile.TemporaryDirectory() as tmpdir:
-                out_tmpl = os.path.join(tmpdir, '%(id)s')
                 ydl_opts = {
                     'skip_download': True,
                     'writesubtitles': True,
                     'writeautomaticsub': True,
                     'subtitleslangs': ['ja', 'en'],
+                    'subtitlesformat': 'json3', # JSON形式で取得
                     'quiet': False, # ログ出力有効化
                     'verbose': True, # デバッグモード
                     'cookiefile': cookies_file_path,
-                    'outtmpl': out_tmpl,
                     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'http_headers': {
                         'Referer': 'https://www.youtube.com/',
@@ -475,43 +417,84 @@ def process_single_video(url, api_key, provided_transcript=None):
                 
                 try:
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        ydl.download([url])
-                    
-                    # 生成されたファイルを探索 (.ja.vtt, .en.vtt など)
-                    found_text = ""
-                    for filename in os.listdir(tmpdir):
-                        if filename.endswith('.vtt'):
-                            print(f"Found subtitle file: {filename}")
-                            # vttを簡易パース
-                            with open(os.path.join(tmpdir, filename), 'r', encoding='utf-8') as f:
-                                lines = f.readlines()
-                                # WEBVTTヘッダーやタイムスタンプを除去してテキストのみ抽出
-                                seen_lines = set() # 重複除去
-                                for line in lines:
-                                    line = line.strip()
-                                    if not line: continue
-                                    if line == 'WEBVTT': continue
-                                    if '-->' in line: continue
-                                    if line.isdigit(): continue # 行番号
-                                    if line not in seen_lines:
-                                        found_text += line + " "
-                                        seen_lines.add(line)
-                            break # 1つ見つかればOK
-                    
-                    transcript_text = found_text
-                    
+                        info = ydl.extract_info(url, download=False)
+                        # 字幕データを探す
+                        import json
+                        
+                        # 自動字幕と手動字幕の両方を探す
+                        subtitles = info.get('subtitles', {}) or info.get('automatic_captions', {})
+                        
+                        target_lang = None
+                        if 'ja' in subtitles: target_lang = 'ja'
+                        elif 'en' in subtitles: target_lang = 'en'
+                        else: 
+                             # 他の言語でもあれば使う
+                             for lang in subtitles:
+                                 if lang.startswith('ja') or lang.startswith('en'):
+                                     target_lang = lang
+                                     break
+                             if not target_lang and subtitles:
+                                 target_lang = list(subtitles.keys())[0]
+
+                        if target_lang:
+                            # JSON3形式の字幕URLを取得
+                            subs_list = subtitles[target_lang]
+                            json3_url = next((s['url'] for s in subs_list if s.get('ext') == 'json3'), None)
+                            
+                            if not json3_url:
+                                json3_url = subs_list[0]['url'] # とりあえず最初のURL
+                                
+                            print(f"Fetching subtitles from: {json3_url}")
+                            # ファイルダウンロード方式へ移行（確実性のため）
+                            
+                    # 再度 yt-dlp (ファイルダウンロード方式)
+                    print("Trying yt-dlp file download mode...")
+                    import tempfile
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        out_tmpl = os.path.join(tmpdir, '%(id)s')
+                        ydl_opts['outtmpl'] = out_tmpl
+                        
+                        try:
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                ydl.download([url])
+                            
+                            # 生成されたファイルを探索 (.ja.vtt, .en.vtt など)
+                            found_text = ""
+                            for filename in os.listdir(tmpdir):
+                                if filename.endswith('.vtt'):
+                                    print(f"Found subtitle file: {filename}")
+                                    # vttを簡易パース
+                                    with open(os.path.join(tmpdir, filename), 'r', encoding='utf-8') as f:
+                                        lines = f.readlines()
+                                        seen_lines = set() # 重複除去
+                                        for line in lines:
+                                            line = line.strip()
+                                            if not line: continue
+                                            if line == 'WEBVTT': continue
+                                            if '-->' in line: continue
+                                            if line.isdigit(): continue # 行番号
+                                            if line not in seen_lines:
+                                                found_text += line + " "
+                                                seen_lines.add(line)
+                                    break # 1つ見つかればOK
+                            
+                            transcript_text = found_text
+                            
+                        except Exception as e:
+                            print(f"yt-dlp download failed: {e}")
+                            traceback.print_exc()
+
                 except Exception as e:
-                    print(f"yt-dlp download failed: {e}")
-                    traceback.print_exc()
+                    print(f"yt-dlp info extraction failed: {e}")
 
-    except Exception as e:
-        print(f"Subtitle extraction overall failed: {e}")
-        traceback.print_exc()
+        except Exception as e:
+            print(f"Subtitle extraction overall failed: {e}")
+            traceback.print_exc()
 
-    # 一時ファイルの削除
-    if cookies_file_path and os.path.exists(cookies_file_path) and os.environ.get('YOUTUBE_COOKIES'):
-            try: os.unlink(cookies_file_path)
-            except: pass
+        # 一時ファイルの削除
+        if cookies_file_path and os.path.exists(cookies_file_path) and os.environ.get('YOUTUBE_COOKIES'):
+                try: os.unlink(cookies_file_path)
+                except: pass
 
     # 方法C: Invidious API (第3の矢: IPブロック回避)
     if not transcript_text:
