@@ -723,6 +723,41 @@ def analyze_videos():
             "error_detail": error_detail
         })
 
+@app.route('/api/debug_info')
+def debug_info():
+    """デバッグ情報を返す (認証なし・開発用)"""
+    import yt_dlp
+    
+    cookies_exists = os.path.exists('cookies.txt')
+    env_cookies_len = len(os.environ.get('YOUTUBE_COOKIES', ''))
+    
+    # yt-dlpからバージョン取得
+    ytdlp_version = yt_dlp.version.__version__
+    
+    # 実際にクッキーファイルが生成できるかテスト
+    temp_cookie_path = "Not created"
+    if os.environ.get('YOUTUBE_COOKIES'):
+        try:
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as tf:
+                tf.write(os.environ.get('YOUTUBE_COOKIES'))
+                temp_cookie_path = tf.name
+            # すぐ消す
+            os.unlink(temp_cookie_path)
+            temp_cookie_path = "Created successfully"
+        except Exception as e:
+            temp_cookie_path = f"Error: {e}"
+
+    return jsonify({
+        "cookies_txt_exists": cookies_exists,
+        "cookies_txt_size": os.path.getsize('cookies.txt') if cookies_exists else 0,
+        "env_YOUTUBE_COOKIES_len": env_cookies_len,
+        "temp_cookie_creation_test": temp_cookie_path,
+        "yt_dlp_version": ytdlp_version,
+        "cwd": os.getcwd(),
+        "ls_cwd": os.listdir('.')
+    })
+
 if __name__ == '__main__':
     print("----------------------------------------------------------------")
     print("Server starting at http://localhost:8000")
