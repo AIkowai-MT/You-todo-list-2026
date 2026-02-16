@@ -1,0 +1,26 @@
+[
+  {
+    "id": "news_bot",
+    "title": "ニュースBot改善",
+    "run": "cd ~/repo/newsbot && ./dev.sh",
+    "schedule": ["10:00"],
+    "labels": ["pending"],
+    "project": "discord-bot"
+  },
+  {
+    "id": "backup_db",
+    "title": "データベースバックアップ",
+    "run": "bash ~/ops/scripts/backup_db.sh",
+    "schedule": ["14:00"],
+    "labels": ["pending"],
+    "project": "infra"
+  },
+  {
+    "id": "log_rotate",
+    "title": "ログローテーション",
+    "run": "bash ~/ops/scripts/rotate_logs.sh",
+    "schedule": ["10:00", "14:00"],
+    "labels": ["pending"],
+    "project": "infra"
+  }
+]
