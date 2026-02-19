@@ -1,12 +1,12 @@
 ---
 title: 操作ガイド
-generated: "2026-02-19T06:06:02.006652+00:00"
+generated: "2026-02-19T09:21:44.882588+00:00"
 type: help
 ---
 
 # 操作ガイド
 
-> 自動生成: 2026-02-19T06:06:02.006652+00:00
+> 自動生成: 2026-02-19T09:21:44.882588+00:00
 > 手動再生成: `python3 /home/autobot/ops/scripts/help_guide.py`
 
 ---
@@ -34,7 +34,7 @@ type: help
 - **タスク定義**: `/home/autobot/ops/tasks.json`
 - **イベントログ**: `/home/autobot/ops/events.jsonl`
 - **Vault**: `/home/autobot/vault/`
-- **Vault remote**: `http://local_proxy@127.0.0.1:34028/git/AIkowai-MT/You-todo-list-2026`
+- **Vault remote**: `http://local_proxy@127.0.0.1:55817/git/AIkowai-MT/You-todo-list-2026`
 - **操作エントリ定義**: `/home/autobot/ops/help_entries.jsonl`
 
 ---
@@ -123,6 +123,20 @@ type: help
   ```
 - **自動実行**: 手動 or cron(label_scan直後)
 - **備考**: help_entries.jsonl から生成
+
+### デプロイ（code→ops反映）
+- **目的**: code/ops/* を ops/ へコピーしスクリプトを反映
+- **実行**:
+  ```bash
+  bash /home/autobot/ops/scripts/deploy_from_code.sh
+  ```
+- **出力先**: `/home/autobot/ops/scripts/ (反映済みファイル群)`
+- **確認**:
+  ```bash
+  ls /home/autobot/ops/scripts/
+  ```
+- **自動実行**: 手動（git pull後・新機能追加時）
+- **備考**: code ディレクトリが存在しない場合はエラー終了
 
 ---
 
