@@ -162,3 +162,38 @@ Obsidian Vault を GitHub Private Repo 経由で同期:
 # Mac側のcron例
 */10 * * * * cd ~/vault && git pull origin main 2>&1
 ```
+
+## 操作ガイド（HELP.md）
+
+`vault/00_Inbox/HELP.md` に Mac/VPS の操作方法・crontab・トラブルシュート情報を
+1ファイルにまとめて自動生成します。
+
+### 手動生成
+
+```bash
+python3 /home/autobot/ops/scripts/help_guide.py
+cat /home/autobot/vault/00_Inbox/HELP.md
+```
+
+### cron に追加する場合（任意）
+
+既存の label_scan の直後に追加:
+
+```cron
+*/30 * * * * /usr/bin/python3 /home/autobot/ops/scripts/help_guide.py
+```
+
+ログを残したい場合は logger を使う方法もあります:
+
+```cron
+*/30 * * * * /usr/bin/python3 /home/autobot/ops/scripts/help_guide.py 2>&1 | logger -t help_guide
+```
+
+### help_entries.jsonl
+
+新機能を追加したら `/home/autobot/ops/help_entries.jsonl` に1行追記してください。
+
+- 必須フィールド: `feature`, `purpose`, `command`, `output`, `verify`
+- 任意フィールド: `how`, `note`
+- パス: 全て絶対パス（`/home/autobot/...`）で記述
+- `#` で始まる行と空行はスキップされます

@@ -1,0 +1,12 @@
+# 操作ガイド生成用エントリ
+# 必須フィールド: feature, purpose, command, output, verify
+# 任意フィールド: how, note
+# パス: 全て絶対パス（/home/autobot/...）で記述
+# 空行と # で始まる行はスキップされます
+
+{"feature":"タスク自動実行","purpose":"定時にタスクを実行しイベントログに記録","command":"python3 /home/autobot/ops/scripts/run_tasks.py --time 10:00","output":"/home/autobot/ops/events.jsonl","verify":"tail -5 /home/autobot/ops/events.jsonl","how":"cron が 10:00/14:00 に自動実行","note":"tasks.json で schedule を編集"}
+{"feature":"日次レポート","purpose":"当日のイベントからデイリーレポートを生成","command":"python3 /home/autobot/ops/scripts/daily_digest.py","output":"/home/autobot/vault/10_Daily/YYYY-MM-DD.md","verify":"ls /home/autobot/vault/10_Daily/","how":"cron が 23:30 に自動実行","note":"events.jsonl が空だと中身が少ない"}
+{"feature":"週次レポート","purpose":"1週間のタスク実行メトリクスを集計","command":"python3 /home/autobot/ops/scripts/weekly_report.py","output":"/home/autobot/vault/20_Weekly/YYYY-WNN.md","verify":"ls /home/autobot/vault/20_Weekly/","how":"cron が毎週月曜 09:00 に自動実行","note":"ISO週(月〜日)で集計"}
+{"feature":"ラベルスキャン","purpose":"タスクをラベル別に一覧生成","command":"python3 /home/autobot/ops/scripts/label_scan.py","output":"/home/autobot/vault/90_Status/{pending,reviewing}.md","verify":"cat /home/autobot/vault/90_Status/pending.md","how":"cron が */30 で自動実行","note":"tasks.json の labels を参照"}
+{"feature":"Vault同期","purpose":"vaultをgit pushでMacと同期","command":"bash /home/autobot/ops/scripts/sync_vault.sh","output":"/home/autobot/vault/ (git push)","verify":"cd /home/autobot/vault && git log --oneline -3","how":"cron が 23:35 に自動実行"}
+{"feature":"操作ガイド生成","purpose":"操作方法まとめ(HELP.md)を自動生成","command":"python3 /home/autobot/ops/scripts/help_guide.py","output":"/home/autobot/vault/00_Inbox/HELP.md","verify":"grep '## Mac' /home/autobot/vault/00_Inbox/HELP.md","how":"手動 or cron(label_scan直後)","note":"help_entries.jsonl から生成"}
