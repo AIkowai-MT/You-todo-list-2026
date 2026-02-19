@@ -1,12 +1,12 @@
 ---
 title: 操作ガイド
-generated: "2026-02-19T09:21:44.882588+00:00"
+generated: "2026-02-19T09:29:29.900831+00:00"
 type: help
 ---
 
 # 操作ガイド
 
-> 自動生成: 2026-02-19T09:21:44.882588+00:00
+> 自動生成: 2026-02-19T09:29:29.900831+00:00
 > 手動再生成: `python3 /home/autobot/ops/scripts/help_guide.py`
 
 ---
@@ -137,6 +137,20 @@ type: help
   ```
 - **自動実行**: 手動（git pull後・新機能追加時）
 - **備考**: code ディレクトリが存在しない場合はエラー終了
+
+### 初回セットアップ
+- **目的**: code/ops/* を ops/ に初回反映（鶏卵解消）
+- **実行**:
+  ```bash
+  bash /home/autobot/code/ops/scripts/bootstrap_ops.sh
+  ```
+- **出力先**: `/home/autobot/ops/scripts/ (反映済み)`
+- **確認**:
+  ```bash
+  ls /home/autobot/ops/scripts/deploy_from_code.sh
+  ```
+- **自動実行**: 初回のみ手動（以後は deploy_from_code.sh）
+- **備考**: code（repo側）から実行する
 
 ---
 
