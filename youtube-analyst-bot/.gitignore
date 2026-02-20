@@ -1,0 +1,12 @@
+# スナップショット（VPSローカルのみ保持）
+ops/data/youtube/snapshots/*.jsonl
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+
+# API Key（念のため）
+.config/
