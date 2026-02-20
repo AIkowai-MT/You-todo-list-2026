@@ -1,12 +1,12 @@
 ---
 title: 操作ガイド
-generated: "2026-02-19T09:29:29.900831+00:00"
+generated: "2026-02-20T11:22:08.715904+00:00"
 type: help
 ---
 
 # 操作ガイド
 
-> 自動生成: 2026-02-19T09:29:29.900831+00:00
+> 自動生成: 2026-02-20T11:22:08.715904+00:00
 > 手動再生成: `python3 /home/autobot/ops/scripts/help_guide.py`
 
 ---
@@ -34,7 +34,7 @@ type: help
 - **タスク定義**: `/home/autobot/ops/tasks.json`
 - **イベントログ**: `/home/autobot/ops/events.jsonl`
 - **Vault**: `/home/autobot/vault/`
-- **Vault remote**: `http://local_proxy@127.0.0.1:55817/git/AIkowai-MT/You-todo-list-2026`
+- **Vault remote**: `http://local_proxy@127.0.0.1:53204/git/AIkowai-MT/You-todo-list-2026`
 - **操作エントリ定義**: `/home/autobot/ops/help_entries.jsonl`
 
 ---
@@ -151,6 +151,20 @@ type: help
   ```
 - **自動実行**: 初回のみ手動（以後は deploy_from_code.sh）
 - **備考**: code（repo側）から実行する
+
+### YouTubeトレンドリサーチ（外部実行）
+- **目的**: 日本のYouTubeトレンドTOP30をカテゴリ別に取得しMarkdown生成
+- **実行**:
+  ```bash
+  sudo -u youtube-analyst-bot /bin/bash /home/youtube-analyst-bot/ops/scripts/yt_trend_pipeline.sh
+  ```
+- **出力先**: `/home/youtube-analyst-bot/vault/30_YouTubeTrends/YYYY-MM-DD.md`
+- **確認**:
+  ```bash
+  ls /home/youtube-analyst-bot/vault/30_YouTubeTrends/
+  ```
+- **自動実行**: cron が 09:00 に自動実行（autobot の run_tasks.py 経由）
+- **備考**: youtube-analyst-bot ユーザーで実行。sudoers 設定必須。API Key: /home/youtube-analyst-bot/.config/youtube_api_key
 
 ---
 
